@@ -1,0 +1,83 @@
+<# dell command|update: install updates #>
+
+Write-Host "Dell Command|Update: Install Updates"
+Write-Host "- Starting Dell Command|Update..."
+
+try {
+#path check for the directory all of the Dell products are hosted in
+	if (-not (Test-Path  "$env:ProgramData\Dell")) {
+		New-Item -Path "$env:ProgramData\Dell" -ItemType Directory -Force
+	}
+#check to see if DCU is even installed on the client machine
+	$Paths = @(
+    "$env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe",
+    "${env:ProgramFiles(x86)}\Dell\CommandUpdate\dcu-cli.exe",
+    "$env:ProgramFiles\Dell\RemoteManagementRestService\dcu-cli.exe"
+)
+
+	$DcuPath = $Paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+	if (-not $DcuPath) {
+		Write-Error "ERROR: Dell Command | Update not found. Ensure DCU is installed."
+		exit 1
+	}
+
+Write-Host "Found DCU at: $DcuPath"
+
+	Write-Host "==============================================="
+
+#check if the DellClientManagementService is enabled and running
+	$date = Get-Date
+	$name = "DellClientManagementService"
+	$service = Microsoft.PowerShell.Management\Get-Service -name $name -ErrorAction SilentlyContinue
+	if (($service.StartType -eq "Disabled") -or ($service.Status -ne 'Running')) {
+		sc.exe config $name start= delayed-auto
+		Start-Service -name $name
+		Write-Host "Dell Client Management Service successfully started."
+	}
+	else {
+		Write-Host "Dell Client Management Service is already started."		
+	}
+
+#run DCU cli agent to scan and apply all new updates
+	$argList = "/applyUpdates -autoSuspendBitLocker=enable -reboot=disable -silent -outputLog=$env:ProgramData\Dell\dcu_log.log"
+	if ($DcuPath) {
+		$Process = Start-Process -FilePath $DcuPath -ArgumentList $argList -Wait -PassThru -NoNewWindow
+		$ExitCode = $Process.ExitCode
+	}
+
+# 5. Handle Dell Specific Exit Codes
+# 0 = Success (No reboot) | 1 = Reboot Required | 2 = No updates found | 3 = Error
+	Write-Host "DCU finished with Exit Code: $ExitCode"
+
+	$RebootRequired = $false
+	$exitStatus = "Success"
+	switch ($ExitCode) {
+		0 { Write-Host "Updates applied successfully. No reboot needed." }
+		1 { Write-Host "Updates applied. A reboot is REQUIRED."; $RebootRequired = $true }
+		2 { Write-Host "No applicable updates found." }
+		4 { Write-Host "Updates applied. A reboot is REQUIRED."; $RebootRequired = $true }
+		5 { Write-Host "A reboot is pending from a previous installation."; $RebootRequired = $true; $exitStatus = "Retry" }
+		6 { Write-Warning "FAILURE: The system is on battery power (DCU requires AC power)."; $ExitStatus = "Ineligible" }
+		default { Write-Warning "DCU returned an unexpected exit code: $ExitCode" }
+}
+
+# 6. Notify User (Datto RMM Friendly)
+# Since Datto runs as SYSTEM, we use msg.exe to break into the user's session
+	if ($RebootRequired) {
+		$Message = "Dell Update Complete: Your computer requires a restart to finish installing updates. Please save your all work and reboot as soon as possible."
+		# Send message to all active console sessions
+		msg * /TIME:0 $Message
+    
+    # Optional: Flag for Datto reboot policy
+		Write-Host "SET_REBOOT_REQUIRED=True" 
+	} else {
+		Write-Host "Update cycle complete. No further action needed."
+		Write-Host "==============================================="
+	}
+	exit 0
+}
+catch {
+	Write-Output "An error has occurred: $($date) `n $($_.Exception.Message)" | Out-File "$env:ProgramData\Dell\dell_log.log" -Append
+    exit 1
+	}
