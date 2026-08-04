@@ -1,0 +1,67 @@
+# --- Dell SupportAssist CLI Installer ---
+#
+# This script will silently install Dell SupportAssist on any targeted endpoints.
+# This script is up to date as of 29.1.2026, however double check that the download
+# mirror provided by Dell has not changed. This uses the stand alone .exe installer 
+# for Business computers only. Some slight modifications can be made to utilize the
+# MSI provided by Dell through the Dell TechDirect portal. This script is offered with
+# no guarantees. Use at your own discretion.
+
+# --- Configuration ---
+$DownloadUrl = "https://downloads.dell.com/serviceability/catalog/SupportAssistBusinessInstaller.exe" 
+$LocalPath = "$env:TEMP\SupportAssistBusinessInstaller.exe"
+$LogPath = "$env:TEMP\SupportAssistInstallLog.txt"
+$installArgs = "/s /v`"/qn /norestart /l*v `"$LogPath`"`""
+$searchName = "*SupportAssist*"
+$regPaths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
+
+# Hide progress bar to speed up download
+$ProgressPreference = 'SilentlyContinue'
+
+try {
+	# 1. Check if the .NET SDK is installed on the device
+	if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+    $dotNetVers = dotnet --list-runtimes 2>$null | Select-String "Microsoft.WindowsDesktop.App 8"
+		if (-not $dotNetVers) {
+			Write-Host ".NET Desktop Runtime 8 not found. Installing..." -ForegroundColor Yellow
+			$installScript = Join-Path $env:TEMP "dotnet-install.ps1"
+			Invoke-WebRequest -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $installScript       
+			# Execute the official MS install script
+			& $installScript -Runtime windowsdesktop -Channel 8.0 -InstallDir "$env:ProgramFiles\dotnet"
+		} else {
+			winget install Microsoft.DotNet.SDK.9
+		}
+	}
+	# 3. Check if SupportAssist is already installed
+	$installed = Get-ItemProperty $regPaths -ErrorAction SilentlyContinue | Where-Object {$_.DisplayName -like $searchName}
+	if ($installed) {
+		Write-Host "Dell SupportAssist installation detected. Exiting installer."
+		Exit
+	}
+	else {	
+    # 4. Download the EXE
+		Write-Host "Downloading installer from $DownloadUrl..." -ForegroundColor Blue
+		Invoke-WebRequest -Uri $DownloadUrl -OutFile $LocalPath -UseBasicParsing
+	
+    # 5. Execute Silent Installation
+		Write-Host "Starting silent installation..." -ForegroundColor Blue
+		$Process = Start-Process -FilePath $LocalPath -ArgumentList $installArgs -Wait -PassThru
+	
+    # 6. Verify Results
+		if ($Process.ExitCode -eq 0) {
+			Write-Host "Success: SupportAssist installed successfully." -ForegroundColor Green
+		} else {
+			Write-Error "Installation failed with Exit Code: $($Process.ExitCode). Check log at $LogPath" -ForegroundColor Red
+		}
+	}
+}
+catch {
+    Write-Error "An error occurred: $($_.Exception.Message)"
+}
+finally {
+    # 7. Cleanup
+    if (Test-Path $LocalPath) {
+        Remove-Item -Path $LocalPath -Force
+        Write-Host "Temporary installer removed." -ForegroundColor Gray
+    }
+}
