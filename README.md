@@ -15,13 +15,8 @@ The Local AI-Powered Job Curator is an automated, containerized pipeline designe
 Before deploying the application, the external host environment must be properly configured.
 
 ### A. Local LLM Configuration (Ollama)
-The system relies on a pre-existing Ollama instance running on the host machine.
-1. Install Ollama on the host system.
-2. Pull the desired evaluation model (e.g., Llama 3) via the host terminal:
-   ```bash
-   ollama run llama3
-   ```
-3. Ensure Ollama is binding to a port accessible by Docker (default is `11434`). The application uses `host.docker.internal` to route traffic from the container to the host's Ollama service.
+The system relies on a pre-existing LLM instance running on the host machine.
+* **[Implimentation Guide](https://github.com/cptncuddles/work_projects/blob/Local-LLM/README.md)**
 
 ### B. Email SMTP Configuration (Gmail Example)
 To allow the script to send emails automatically without triggering security blocks:
